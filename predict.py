@@ -61,17 +61,12 @@ agent = DRLAgent(env = env_train)
 
 model_wm = agent.get_model("wm")
 
-print('START TRAIN')
-trained_wm = agent.train_model(model=model_wm, 
-                             tb_log_name='wm',
-                             total_timesteps=30000)
-
 trade = data_split(data_df, start = '2019-01-01', end = '2021-01-01')
 
 e_trade_gym = StockTradingEnv(df = trade, **env_kwargs)
 env_trade, obs_trade = e_trade_gym.get_sb_env()
 
-df_account_value, df_actions = DRLAgent.DRL_prediction(model=trained_wm,
+df_account_value, df_actions = DRLAgent.DRL_prediction(model=model_wm,
                                            test_data = trade,
                                            test_env = env_trade,
                                            test_obs = obs_trade)

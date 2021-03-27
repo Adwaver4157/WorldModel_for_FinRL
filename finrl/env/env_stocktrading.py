@@ -125,8 +125,7 @@ class StockTradingEnv(gym.Env):
 
 
     def step(self, actions):
-        actions = np.array(actions)
-        #print(actions)
+        # print("In step, {}".format(actions))
         self.terminal = self.day >= len(self.df.index.unique())-1
         if self.terminal:
             # print(f"Episode: {self.episode}")

@@ -55,7 +55,7 @@ class Controller(BasePolicy):
 
     def forward(self, *state: th.Tensor) -> th.Tensor:
         cat_in = th.cat(state, dim=1)
-        return self.fc(cat_in)
+        return th.tanh(self.fc(cat_in))
 
     def _predict(self, *state: th.Tensor, deterministic: bool = True) -> th.Tensor:
         prob = self.forward(state)

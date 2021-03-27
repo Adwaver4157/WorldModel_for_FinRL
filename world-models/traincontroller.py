@@ -97,7 +97,7 @@ def slave_routine(p_queue, r_queue, e_queue, p_index):
                 sleep(.1)
             else:
                 s_id, params = p_queue.get()
-                r_queue.put((s_id, r_gen.rollout(params)))
+                r_queue.put((s_id, r_gen.rollout(params, env=self._vec_normalize_env)))
 
 
 ################################################################################

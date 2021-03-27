@@ -7,6 +7,8 @@ import numpy as np
 import gym
 import gym.envs.box2d
 
+from typing import Dict, Generator, Optional, Union
+
 # A bit dirty: manually change size of car racing env
 #gym.envs.box2d.car_racing.STATE_W, gym.envs.box2d.car_racing.STATE_H = 64, 64
 
@@ -123,7 +125,27 @@ class RolloutGenerator(object):
         _, _, _, _, _, next_hidden = self.mdnrnn(action, latent_mu, hidden)
         return action.squeeze().cpu().numpy(), next_hidden
 
-    def rollout(self, params, render=False):
+    def _normalize_obs(self,
+        obs: Union[np.ndarray, Dict[str, np.ndarray]], env = None
+    ) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+        if env is not None:
+            return env.normalize_obs(obs)
+        return obs
+    
+    def to_torch(self, array: np.ndarray, copy: bool = True) -> torch.Tensor:
+        """
+        Convert a numpy array to a PyTorch tensor.
+        Note: it copies the data by default
+        :param array:
+        :param copy: Whether to copy or not the data
+            (may be useful to avoid changing things be reference)
+        :return:
+        """
+        if copy:
+            return torch.tensor(array).to(self.device)
+        return torch.as_tensor(array).to(self.device)
+
+    def rollout(self, params, env, render=False):
         """ Execute a rollout and returns minus cumulative reward.
         Load :params: into the controller and execute a single rollout. This
         is the main API of this class.
@@ -146,9 +168,21 @@ class RolloutGenerator(object):
         cumulative = 0
         i = 0
         while True:
-            obs = transform(obs).unsqueeze(0).to(self.device)
+            """
+            if self.optimize_memory_usage:
+                next_obs = self._normalize_obs(self.observations[(batch_inds + 1) % self.buffer_size, 0, :], env)
+            else:
+            """
+            if not isinstance(obs, np.ndarray):
+                obs = np.array(obs)
+            
+            obs = self._normalize_obs(obs, env)
+            obs = self.to_torch(obs)
+            # obs = transform(obs).unsqueeze(0).to(self.device)
             action, hidden = self.get_action_and_transition(obs, hidden)
-            print(action)
+            action = np.array([action])
+            action = self._normalize_obs(action, env)
+            action = np.array([action])
             obs, reward, done, _ = self.env.step(action)
 
             if render:

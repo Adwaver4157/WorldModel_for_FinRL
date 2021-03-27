@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 from time import sleep
+from tqdm import tqdm
 import gym
 import cma
 import numpy as np
@@ -141,7 +142,9 @@ class WorldModel(OffPolicyAlgorithm):
         self.exploration_rate = 0.0
         # VAE and MDNRNN will be defined in `_setup_model()`
         self.vae, self.mdnrnn, self.mdnrnncell, self.controller = None, None, None, None
-        self.hidden = None
+        self.hidden = [
+            th.zeros(1, 256).to(self.device)
+            for _ in range(2)]
 
         if _init_setup_model:
             self._setup_model()
@@ -253,7 +256,6 @@ class WorldModel(OffPolicyAlgorithm):
         else:
             gpu = 0
         device = th.device('cuda:{}'.format(gpu) if th.cuda.is_available() else 'cpu')
-
         with th.no_grad():
             r_gen = RolloutGenerator(
                 self.vae, self.mdnrnn, self.mdnrnncell, self.controller, self.env, self.device, 1000)
@@ -263,9 +265,9 @@ class WorldModel(OffPolicyAlgorithm):
                     sleep(.1)
                 else:
                     s_id, params = p_queue.get()
-                    r_queue.put((s_id, r_gen.rollout(params)))
+                    r_queue.put((s_id, r_gen.rollout(params, env=self._vec_normalize_env)))
 
-    def evaluate(solutions, results, rollouts=100):
+    def evaluate(self, p_queue, r_queue, solutions, results, rollouts=100):
         """ Give current controller evaluation.
 
         Evaluation is minus the cumulated reward averaged over rollout runs.
@@ -302,14 +304,14 @@ class WorldModel(OffPolicyAlgorithm):
         self.controller = self.policy.controller
 
     def train_vae(self, gradient_steps: int, batch_size: int = 64) -> None:
-        print('TRAIN VAE')
+        # print('TRAIN VAE')
         self._update_learning_rate(self.vae.optimizer)
         losses = []
         for gradient_step in range(gradient_steps):
             # Sample replay buffer
             replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
             recon_batch, mu, logvar = self.vae(replay_data.observations)
-            loss = self.loss_function(recon_batch, data, mu, logvar)
+            loss = self.loss_function(recon_batch, replay_data.observations, mu, logvar)
             losses.append(loss.item())
             # Optimize the policy
             self.vae.optimizer.zero_grad()
@@ -319,7 +321,7 @@ class WorldModel(OffPolicyAlgorithm):
             self.vae.optimizer.step()
 
     def train_mdnrnn(self, gradient_steps: int, batch_size: int = 64) -> None:
-        print('TRAIN MDNRNN')
+        # print('TRAIN MDNRNN')
         self._update_learning_rate(self.vae.optimizer)
         losses = []
         for gradient_step in range(gradient_steps):
@@ -354,11 +356,11 @@ class WorldModel(OffPolicyAlgorithm):
         return th.as_tensor(array).to(self.device)
 
     def predict(self, obs):
-        obs = map(self.to_torch, obs)
-        _, latent_mu, _ = self.vae(obs)
+        _, latent_mu, _ = self.vae(self.to_torch(obs))
         action = self.controller(latent_mu, self.hidden[0])
         _, _, _, _, _, self.hidden = self.mdnrnncell(action, latent_mu, self.hidden)
-        return action.reshape(-1)
+        action = action.reshape(-1).detach().numpy()
+        return np.array([action]), _
 
     def learn(
         self,
@@ -380,6 +382,7 @@ class WorldModel(OffPolicyAlgorithm):
         callback.on_training_start(locals(), globals())
 
         # train vae
+        print("Train VAE...")
         while self.num_timesteps < total_timesteps:
             rollout = self.collect_rollouts(
                 self.env,
@@ -390,17 +393,22 @@ class WorldModel(OffPolicyAlgorithm):
                 replay_buffer=self.replay_buffer,
                 log_interval=log_interval,
             )
-
+            """
             if rollout.continue_training is False:
                 break
-
+            
             if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
                 # If no `gradient_steps` is specified,
                 # do as many gradients steps as steps performed during the rollout
+                print("T VAE")
                 gradient_steps = self.gradient_steps if self.gradient_steps > 0 else rollout.episode_timesteps
                 self.train_vae(batch_size=self.batch_size, gradient_steps=gradient_steps)
+            """
+            gradient_steps = self.gradient_steps if self.gradient_steps > 0 else rollout.episode_timesteps
+            self.train_vae(batch_size=self.batch_size, gradient_steps=gradient_steps)
 
         # train mdnrnn
+        print("Train MDNRNN...")
         self.replay_buffer = ReplayBufferAD(
             self.buffer_size,
             self.observation_space,
@@ -420,17 +428,22 @@ class WorldModel(OffPolicyAlgorithm):
                 replay_buffer=self.replay_buffer,
                 log_interval=log_interval,
             )
-
+            """
             if rollout.continue_training is False:
                 break
 
             if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
                 # If no `gradient_steps` is specified,
                 # do as many gradients steps as steps performed during the rollout
+                print("T MDNRNN")
                 gradient_steps = self.gradient_steps if self.gradient_steps > 0 else rollout.episode_timesteps
                 self.train_mdnrnn(batch_size=self.batch_size, gradient_steps=gradient_steps)
+            """
+            gradient_steps = self.gradient_steps if self.gradient_steps > 0 else rollout.episode_timesteps
+            self.train_mdnrnn(batch_size=self.batch_size, gradient_steps=gradient_steps)
 
         # train controller
+        print("Train Controller...")
         p_queue = Queue()
         r_queue = Queue()
         e_queue = Queue()
@@ -454,10 +467,11 @@ class WorldModel(OffPolicyAlgorithm):
             
             r_list = [0] * 4  # result list
             solutions = es.ask()
-
             # push parameters to queue
+            i = 0
             for s_id, s in enumerate(solutions):
                 for _ in range(4):
+                    i += 1
                     p_queue.put((s_id, s))
 
             # retrieve results
@@ -469,10 +483,9 @@ class WorldModel(OffPolicyAlgorithm):
 
             es.tell(solutions, r_list)
             es.disp()
-
             # evaluation and saving
             if epoch % log_step == log_step - 1:
-                best_params, best, std_best = self.evaluate(solutions, r_list)
+                best_params, best, std_best = self.evaluate(p_queue, r_queue, solutions, r_list)
                 print("Current evaluation: {}".format(best))
                 if not cur_best or cur_best > best:
                     cur_best = best
