@@ -393,7 +393,7 @@ class WorldModel(OffPolicyAlgorithm):
                 replay_buffer=self.replay_buffer,
                 log_interval=log_interval,
             )
-            """
+            
             if rollout.continue_training is False:
                 break
             
@@ -406,7 +406,7 @@ class WorldModel(OffPolicyAlgorithm):
             """
             gradient_steps = self.gradient_steps if self.gradient_steps > 0 else rollout.episode_timesteps
             self.train_vae(batch_size=self.batch_size, gradient_steps=gradient_steps)
-
+            """
         # train mdnrnn
         print("Train MDNRNN...")
         self.replay_buffer = ReplayBufferAD(
@@ -428,7 +428,7 @@ class WorldModel(OffPolicyAlgorithm):
                 replay_buffer=self.replay_buffer,
                 log_interval=log_interval,
             )
-            """
+            
             if rollout.continue_training is False:
                 break
 
@@ -441,7 +441,7 @@ class WorldModel(OffPolicyAlgorithm):
             """
             gradient_steps = self.gradient_steps if self.gradient_steps > 0 else rollout.episode_timesteps
             self.train_mdnrnn(batch_size=self.batch_size, gradient_steps=gradient_steps)
-
+            """
         # train controller
         print("Train Controller...")
         p_queue = Queue()
